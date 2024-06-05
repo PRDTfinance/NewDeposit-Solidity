@@ -350,5 +350,17 @@ contract ProBalance is Ownable {
         );
 
         _transferEthOrToken(tokenAddress, user, amount);
+  }
+
+//THIS FUNCTION IS FOR ONRAMP CREDIT CARD TOP-UP. relayer will call this function to add USDT 
+//balance in user's address
+function addTokenBalanceForUser(
+        address user,
+        address token,
+        uint256 amount
+    ) external {
+        require(allowedDepositTokens[token], "token not accepted");
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        emit TokenBalanceAdded(user, amount, token);
     }
 }
