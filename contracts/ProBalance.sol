@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 interface IWETH9 is IERC20 {
     /// @notice Deposit ether to get wrapped ether
@@ -54,7 +55,7 @@ interface ISwapRouter02 {
     ) external payable returns (uint256 amountIn);
 }
 
-contract ProBalance is Ownable {
+contract ProBalance is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     address public i_USDT;
@@ -63,6 +64,7 @@ contract ProBalance is Ownable {
     bool public acceptNative;
     ISwapRouter02 public swapRouter;
     mapping(address => bool) public allowedDepositTokens;
+    address public relayer;
 
     address public operator;
     bool public acceptWithdraw;
@@ -125,7 +127,7 @@ contract ProBalance is Ownable {
         allowedDepositTokens[_usdc] = true;
     }
 
-    function addBalance() external payable {
+    function addBalance() external payable nonReentrant {
         require(acceptNative, "native not accepted");
         emit BalanceAdded(msg.sender, msg.value);
     }
@@ -134,7 +136,7 @@ contract ProBalance is Ownable {
         address targetToken,
         uint256 amountOutMinimum,
         uint24 poolFee
-    ) external payable {
+    ) external payable nonReentrant {
         require(
             targetToken == i_USDT || targetToken == i_USDC,
             "cant convert to target"
@@ -159,10 +161,24 @@ contract ProBalance is Ownable {
         emit TokenBalanceAdded(msg.sender, targetAmount, targetToken);
     }
 
-    function addTokenBalance(address token, uint256 amount) external {
+    function addTokenBalance(
+        address token,
+        uint256 amount
+    ) external nonReentrant {
         require(allowedDepositTokens[token], "token not accepted");
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         emit TokenBalanceAdded(msg.sender, amount, token);
+    }
+
+    function addTokenBalanceForUser(
+        address user,
+        address token,
+        uint256 amount
+    ) external nonReentrant {
+        require(msg.sender != relayer, "only relayer");
+        require(allowedDepositTokens[token], "token not accepted");
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        emit TokenBalanceAdded(user, amount, token);
     }
 
     function addTokenBalanceWithSwap(
@@ -171,7 +187,7 @@ contract ProBalance is Ownable {
         uint256 amount,
         uint256 amountOutMinimum,
         uint24 poolFee
-    ) external {
+    ) external nonReentrant {
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         require(
             targetToken == i_USDT || targetToken == i_USDC,
@@ -202,7 +218,7 @@ contract ProBalance is Ownable {
         uint256 amountOutMinimum,
         uint24 poolFee1,
         uint24 poolFee2
-    ) external {
+    ) external nonReentrant {
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         require(
             targetToken == i_USDT || targetToken == i_USDC,
@@ -228,7 +244,7 @@ contract ProBalance is Ownable {
         emit TokenBalanceAdded(msg.sender, targetAmount, targetToken);
     }
 
-    function injectTreasury() external payable {
+    function injectTreasury() external payable nonReentrant {
         emit InjectTreasury(msg.value);
     }
 
@@ -270,6 +286,10 @@ contract ProBalance is Ownable {
         uint256 _amount
     ) external onlyOwner {
         maxSingleWithdraw[_token] = _amount;
+    }
+
+    function setRelayer(address _relayer) external onlyOwner {
+        relayer = _relayer;
     }
 
     function recoverAmount(uint256 amount) external onlyOwner {
@@ -350,17 +370,5 @@ contract ProBalance is Ownable {
         );
 
         _transferEthOrToken(tokenAddress, user, amount);
-  }
-
-//THIS FUNCTION IS FOR ONRAMP CREDIT CARD TOP-UP. relayer will call this function to add USDT 
-//balance in user's address
-function addTokenBalanceForUser(
-        address user,
-        address token,
-        uint256 amount
-    ) external {
-        require(allowedDepositTokens[token], "token not accepted");
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-        emit TokenBalanceAdded(user, amount, token);
     }
 }
